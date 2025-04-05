@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import json
+import asyncio
+from typing import AsyncGenerator, Dict, List, Optional, Union
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+env_path = Path(__file__).resolve().parent.parent / '.env'
+load_dotenv(env_path)
+
+# Verify API key is set
+if not os.getenv("OPENAI_API_KEY"):
+    raise ValueError("OPENAI_API_KEY not found in environment variables. Please set it in .env file.")
+
+from openai import OpenAI
+from agents import Agent, Runner, gen_trace_id, trace, ModelSettings
+from agents.mcp import MCPServerStdio
+
+# Default model configuration
+DEFAULT_MODEL = "gpt-4o"  # or gpt-4 or gpt-3.5-turbo
+
+async def run_agent(
+    prompt: str,
+    streaming: bool = True,
+    mcp_proxy_addr: str = "mcp-proxy-agent-1",
+    trace_file: Optional[str] = "agent_trace.jsonl",
+    model: str = DEFAULT_MODEL
+) -> Union[str, AsyncGenerator[str, None]]:
+    """
+    Run the OpenAI agent with the given prompt.
+    
+    Args:
+        prompt: The user prompt to process
+        streaming: Whether to stream the response
+        mcp_proxy_addr: The MCP proxy address
+        trace_file: File to save traces to, None to disable tracing
+        model: The OpenAI model to use (default: gpt-4o)
+    
+    Returns:
+        Either a string with the complete response or an async generator for streaming
+    """
+    # Setup OpenAI client
+    client = OpenAI()
+    
+    # Generate trace ID for this run
+    trace_id = gen_trace_id()
+    
+    # Connect to MCP server using stdio mode
+    async with MCPServerStdio(
+        name="MCP Proxy Server",
+        params={
+            "command": "/Users/frankhe/.local/bin/mcp-proxy",
+            "args": ["https://sequencer-v2.heurist.xyz/mcp/sse"],
+        }
+    ) as mcp_server:
+        # Create the agent with model settings
+        model_settings = ModelSettings(
+            temperature=0.1,  # Lower temperature for more focused responses
+            max_tokens=2000,  # Reasonable length for responses
+        )
+        
+        agent = Agent(
+            name="Assistant",
+            instructions="You are a helpful assistant that uses tools to answer user questions.",
+            mcp_servers=[mcp_server],
+            model=model,
+            model_settings=model_settings
+        )
+        
+        # Run with tracing
+        with trace(workflow_name="MCP Agent", trace_id=trace_id):
+            print(f"View trace: https://platform.openai.com/traces/trace?trace_id={trace_id}\n")
+            
+            # Run the agent
+            result = await Runner.run(
+                starting_agent=agent,
+                input=prompt
+            )
+            
+            if streaming:
+                # For streaming, we'll need to process the response differently
+                async def stream_response():
+                    for chunk in result.final_output.split():
+                        yield chunk + " "
+                return stream_response()
+            else:
+                return result.final_output
+
+async def main():
+    """Main entry point for the CLI application."""
+    print("OpenAI Agent with MCP Server")
+    print("Type 'exit' to quit\n")
+    
+    while True:
+        try:
+            prompt = input("👤 You: ")
+            if prompt.lower() in ("exit", "quit"):
+                break
+            
+            print("🤖 Assistant: ", end="", flush=True)
+            
+            # Run agent with streaming
+            async for chunk in await run_agent(prompt):
+                print(chunk, end="", flush=True)
+            print()  # Newline after response
+            
+        except KeyboardInterrupt:
+            print("\nExiting...")
+            break
+        except Exception as e:
+            print(f"\nError: {e}")
+
+if __name__ == "__main__":
+    asyncio.run(main()) 
