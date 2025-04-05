@@ -32,3 +32,5 @@ agent_trace.jsonl
 .vscode/
 *.swp
 *.swo 
+
+.venv/

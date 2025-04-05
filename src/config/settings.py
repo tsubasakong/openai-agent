@@ -32,23 +32,25 @@ class Settings:
         # Agent settings
         self.default_model = os.getenv("OPENAI_DEFAULT_MODEL", "gpt-4o")
         self.temperature = float(os.getenv("OPENAI_TEMPERATURE", "0.1"))
-        self.max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "2000"))
+        self.max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "100000"))
         
         # MCP Proxy settings
         self.mcp_proxy_command = os.getenv("MCP_PROXY_COMMAND", "/Users/frankhe/.local/bin/mcp-proxy")
-        self.mcp_proxy_url = os.getenv("MCP_PROXY_URL", "https://sequencer-v2.heurist.xyz/mcp/sse")
+        self.mcp_proxy_url = os.getenv("MCP_PROXY_URL", "https://sequencer-v2.heurist.xyz/toolf22e9e8c/sse")
         
         # Telegram Bot settings
         self.telegram_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
-        self.telegram_allowed_users = self._parse_allowed_users()
+        self.telegram_chat_id = self._parse_chat_id()
     
-    def _parse_allowed_users(self) -> list:
-        """Parse the comma-separated list of allowed Telegram user IDs."""
-        allowed_users_str = os.getenv("TELEGRAM_ALLOWED_USERS", "")
-        if not allowed_users_str:
-            return []
-        
-        return [int(user_id.strip()) for user_id in allowed_users_str.split(",") if user_id.strip()]
+    def _parse_chat_id(self) -> Optional[int]:
+        """Parse the Telegram chat ID from environment variables."""
+        chat_id = os.getenv("TELEGRAM_CHAT_ID")
+        if not chat_id:
+            return None
+        try:
+            return int(chat_id)
+        except ValueError:
+            raise ValueError("TELEGRAM_CHAT_ID must be a valid integer")
     
     def get_agent_config(self) -> Dict[str, Any]:
         """Get the agent configuration settings."""
@@ -62,4 +64,4 @@ class Settings:
     
     def is_telegram_configured(self) -> bool:
         """Check if Telegram is properly configured."""
-        return bool(self.telegram_token) 
+        return bool(self.telegram_token and self.telegram_chat_id) 

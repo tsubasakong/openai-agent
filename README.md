@@ -115,3 +115,70 @@ To customize how the agent operates:
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. 
+
+# OpenAI Agent with Telegram Bot
+
+This project implements an AI assistant using the OpenAI API and provides a Telegram bot interface.
+
+## Setup
+
+1. Create a Python virtual environment:
+   ```
+   python -m venv .venv
+   ```
+
+2. Activate the virtual environment:
+   ```
+   # On macOS/Linux
+   source .venv/bin/activate
+   
+   # On Windows
+   .venv\Scripts\activate
+   ```
+
+3. Install dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
+
+4. Create a `.env` file in the project root with your API keys:
+   ```
+   OPENAI_API_KEY=your_openai_api_key
+   TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+   ```
+
+## Running the Telegram Bot
+
+To run the Telegram bot in non-streaming mode:
+
+```
+python telebot_version.py
+```
+
+### Bot Commands
+
+The bot supports the following commands:
+- `/start` - Start the bot
+- `/help` - Show available commands
+- `/model` - Show current model settings
+- `/stats` - Show conversation statistics
+- `/ask [question]` - Ask a question to the AI assistant
+
+In private chats, the bot responds to all messages. In group chats, it only responds to messages that start with `/ask`.
+
+For more detailed instructions, see [TELEGRAM_BOT_GUIDE.md](TELEGRAM_BOT_GUIDE.md).
+
+## Features
+
+- Chat with OpenAI assistants via Telegram
+- Supports both text and file sharing
+- Command support (/start, /help, /model, /stats)
+- User authentication
+
+## CLI Mode
+
+To run the CLI version of the assistant:
+
+```
+python src/main.py
+``` 
