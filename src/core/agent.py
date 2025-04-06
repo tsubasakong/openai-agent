@@ -246,8 +246,8 @@ class AgentManager:
         original_url = self.mcp_proxy_url
         url_patterns = [
             original_url,
-            "https://sequencer-v2.heurist.xyz/mcp/sse",  # Generic endpoint
-            "https://sequencer.openai.com/mcp/sse",      # Alternative endpoint
+            "https://sequencer-v2.heurist.xyz/tool6c4acdfe/sse",  # Generic endpoint
+            "https://sequencer-v2.heurist.xyz/tool2782c748/sse",      # Alternative endpoint
         ]
         
         last_exception = None

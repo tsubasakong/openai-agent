@@ -1,51 +1,43 @@
 #!/usr/bin/env python3
 
+"""
+Debug script for testing the agent directly from the command line.
+This is a wrapper around the CLI interface with more detailed error output.
+"""
+
 import asyncio
-import json
-from src.core.agent import AgentManager, AgentError
-from src.config.settings import Settings
+import logging
 from dotenv import load_dotenv
+from src.interfaces.cli.terminal import TerminalInterface
+from src.core.agent import AgentError
+
+# Set up logging
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 async def main():
+    """Main debug function."""
+    # Load env variables
+    load_dotenv(override=True)
+    
+    terminal = TerminalInterface(streaming=False)
+    
     print("Debug Agent Interface")
     print("Type 'exit' to quit")
     print("-" * 50)
     
     while True:
         try:
-            # Reload environment variables before each request
-            load_dotenv(override=True)
-            
-            # Reinitialize settings and agent manager with fresh env variables
-            settings = Settings()
-            agent_config = settings.get_agent_config()
-            agent_manager = AgentManager(**agent_config)
-            
-            # Show current settings
-            print(f"\nCurrent settings:")
-            print(f"Model: {agent_config['model']}")
-            print(f"Temperature: {agent_config['temperature']}")
-            print(f"Max tokens: {agent_config['max_tokens']}")
-            print(f"MCP URL: {agent_config['mcp_proxy_url']}")
-            print("-" * 50)
-            
             # Get user input
             user_input = input("\nEnter your question: ")
             
             if user_input.lower() == 'exit':
                 break
             
-            # Process the message
-            print("\nProcessing your request...")
-            response = await agent_manager.process_message_robust(
-                message=user_input,
-                streaming=False  # Disable streaming for cleaner debug output
-            )
-            
-            print("\nResponse:")
-            print("-" * 50)
-            print(response)
-            print("-" * 50)
+            # Process with more detailed error output
+            await terminal._get_nonstreaming_response(user_input)
             
         except AgentError as e:
             print("\nError occurred!")
