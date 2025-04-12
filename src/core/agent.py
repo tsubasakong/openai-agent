@@ -5,11 +5,34 @@ import asyncio
 import json
 import time
 import random
-from typing import AsyncGenerator, Dict, List, Optional, Union
+from typing import AsyncGenerator, Dict, List, Optional, Union, Callable, Any
 from pathlib import Path
 from openai import OpenAI, OpenAIError
 from agents import Agent as OpenAIAgent, Runner, gen_trace_id, trace, ModelSettings
+from agents import InputGuardrail, GuardrailFunctionOutput
 from agents.mcp import MCPServerStdio
+from agents.exceptions import (
+    AgentsException,
+    MaxTurnsExceeded,
+    ModelBehaviorError,
+    UserError,
+    InputGuardrailTripwireTriggered,
+    OutputGuardrailTripwireTriggered
+)
+from pydantic import BaseModel
+
+# Default instructions for the Solana meme coin analyst agent
+DEFAULT_INSTRUCTIONS = """You are a specialized Solana meme coin analyst who integrates both on-chain data and social signals. You will analyze the following aspects of Solana meme coins:
+
+1. Token Background: Research the token's origins, development history, and founding team using web search. If the token address is provided, use it as a search query. The token address format example in solana is 83astqz8y8w8q174vfanrky3wejk9245pd82h7q224wq9k3q9234 or has "pump" at its end, for address on evm, it starts with 0x. Use your best effort to figure out the exact whole token address at first. Look for information about when it was launched, who created it, and its intended purpose or community.
+
+2. On-Chain Analysis: Examine blockchain data including holder metrics, liquidity pools, trading volume, wallet distribution, and notable transactions.
+
+3. Social Signals: Evaluate Twitter engagement, sentiment analysis, influencer coverage, and community growth.
+
+4. Key People Analysis: When any Twitter handles, usernames, or individuals are mentioned in relation to the token, research their background, credibility, past projects, and specific relationship to this token. Search with handle @username with higher priority, then search with username username, then search with name full name.
+
+Organize your response with clear sections for token background, on-chain metrics, social signals, and key people analysis. Prioritize objective data over hype and identify both bullish and bearish signals. Support your analysis with specific, current data points whenever possible."""
 
 class AgentError(Exception):
     """Custom error class for agent-related errors"""
@@ -28,12 +51,18 @@ class AgentManager:
         self,
         model: str = "gpt-4o",
         temperature: float = 0.1,
-        max_tokens: int = 10000,
+        max_tokens: int = 50000,
         mcp_proxy_command: str = "/Users/frankhe/.local/bin/mcp-proxy",
         mcp_proxy_url: str = "https://sequencer-v2.heurist.xyz/toolf22e9e8c/sse",
-        instructions: str = "You are a helpful assistant that uses tools to answer user questions use your available tools to answer the user's question the best you can with all your full efforts. You must use the language of the user's question to respond to the user's question.",
+        instructions: str = DEFAULT_INSTRUCTIONS,
         max_retries: int = 3,
-        retry_delay_base: float = 1.0
+        retry_delay_base: float = 1.0,
+        handoffs: List[OpenAIAgent] = None,
+        input_guardrails: List[InputGuardrail] = None,
+        context: Optional[Dict[str, Any]] = None,
+        enable_mcp_cache: bool = True,
+        cache_ttl_seconds: int = 3600,  # Default: 1 hour cache lifetime
+        enable_guardrails: bool = True  # New option to enable/disable guardrails
     ):
         """
         Initialize the Agent Manager.
@@ -47,6 +76,12 @@ class AgentManager:
             instructions: Agent instructions/system prompt
             max_retries: Maximum number of retries for API calls
             retry_delay_base: Base delay (in seconds) for exponential backoff
+            handoffs: List of agents that this agent can hand off to
+            input_guardrails: List of input guardrails to apply
+            context: Initial context for the agent
+            enable_mcp_cache: Whether to enable caching for MCP server responses
+            cache_ttl_seconds: Time-to-live for cached MCP responses in seconds
+            enable_guardrails: Whether to enable guardrail functionality
         """
         self.model = model
         self.temperature = temperature
@@ -57,7 +92,15 @@ class AgentManager:
         self.max_retries = max_retries
         self.retry_delay_base = retry_delay_base
         self.client = OpenAI()
+        self.handoffs = handoffs or []
+        self.input_guardrails = input_guardrails or []
+        self.context = context or {}
+        self.enable_mcp_cache = enable_mcp_cache
+        self.cache_ttl_seconds = cache_ttl_seconds
+        self.enable_guardrails = enable_guardrails
+        
         self.fallback_models = ["gpt-4o-mini"]
+        self.mcp_server = None
 
     async def _exponential_backoff(self, retry_count: int) -> None:
         """Exponential backoff with jitter for retries."""
@@ -75,27 +118,34 @@ class AgentManager:
                     # Generate trace ID for this run
                     self.trace_id = gen_trace_id()
                     
-                    # Create MCP server
+                    # Create MCP server with proper tool caching
                     self.mcp_server = MCPServerStdio(
                         name="MCP Proxy Server",
                         params={
                             "command": self.mcp_proxy_command,
                             "args": [self.mcp_proxy_url],
-                        }
+                        },
+                        # Enable tools caching per the OpenAI SDK documentation
+                        cache_tools_list=self.enable_mcp_cache
                     )
                     
                     # Create the agent with model settings
                     model_settings = ModelSettings(
                         temperature=self.temperature,
-                        max_tokens=min(self.max_tokens, 4000),  # Cap max_tokens to prevent errors
+                        max_tokens=min(self.max_tokens, 10000),  # Cap max_tokens to prevent errors
                     )
+                    
+                    # Apply guardrails only if enabled
+                    active_guardrails = self.input_guardrails if self.enable_guardrails else []
                     
                     agent = OpenAIAgent(
                         name="Assistant",
                         instructions=self.instructions,
                         mcp_servers=[self.mcp_server],
                         model=current_model,
-                        model_settings=model_settings
+                        model_settings=model_settings,
+                        handoffs=self.handoffs,
+                        input_guardrails=active_guardrails
                     )
                     
                     # If using a fallback model, log it
@@ -131,9 +181,119 @@ class AgentManager:
             try:
                 result = await Runner.run(
                     starting_agent=agent,
-                    input=message
+                    input=message,
+                    context=self.context
                 )
+                
+                # Update context with any new values from the result
+                if hasattr(result, 'context') and result.context:
+                    self.context.update(result.context)
+                
                 return result
+            except MaxTurnsExceeded as e:
+                # Maximum back-and-forth exceeded
+                error_details = {
+                    "type": "MaxTurnsExceeded", 
+                    "message": e.message,
+                    "retry": retry + 1,
+                    "max_retries": self.max_retries
+                }
+                
+                print(f"Max turns exceeded error: {e.message}")
+                if retry >= self.max_retries - 1:
+                    raise AgentError(
+                        f"Conversation exceeded maximum turns: {e.message}",
+                        error_details,
+                        retriable=False
+                    ) from e
+                
+                # Try again with a different retry
+                await self._exponential_backoff(retry)
+                
+            except ModelBehaviorError as e:
+                # Model calling nonexistent tools or providing malformed JSON
+                error_details = {
+                    "type": "ModelBehaviorError", 
+                    "message": e.message,
+                    "retry": retry + 1,
+                    "max_retries": self.max_retries
+                }
+                
+                print(f"Model behavior error: {e.message}")
+                # This could be due to complex query with too many tool calls
+                # Try again with a different retry
+                if retry >= self.max_retries - 1:
+                    raise AgentError(
+                        f"Model behavior error: {e.message}",
+                        error_details,
+                        retriable=True  # May be worth retrying with a different prompt
+                    ) from e
+                
+                await self._exponential_backoff(retry)
+                
+            except InputGuardrailTripwireTriggered as e:
+                # Input guardrail was triggered
+                error_details = {
+                    "type": "InputGuardrailTriggered", 
+                    "guardrail": e.guardrail_result.guardrail.__class__.__name__,
+                    "details": str(e.guardrail_result)
+                }
+                
+                # This is expected behavior for unsafe content, not retriable
+                raise AgentError(
+                    f"Input guardrail triggered: {e.guardrail_result.guardrail.__class__.__name__}",
+                    error_details,
+                    retriable=False
+                ) from e
+                
+            except OutputGuardrailTripwireTriggered as e:
+                # Output guardrail was triggered
+                error_details = {
+                    "type": "OutputGuardrailTriggered", 
+                    "guardrail": e.guardrail_result.guardrail.__class__.__name__,
+                    "details": str(e.guardrail_result)
+                }
+                
+                # This is expected behavior for unsafe content, not retriable
+                raise AgentError(
+                    f"Output guardrail triggered: {e.guardrail_result.guardrail.__class__.__name__}",
+                    error_details,
+                    retriable=False
+                ) from e
+                
+            except UserError as e:
+                # User error in SDK usage
+                error_details = {
+                    "type": "UserError", 
+                    "message": e.message
+                }
+                
+                # Configuration error, not retriable
+                raise AgentError(
+                    f"User error in SDK usage: {e.message}",
+                    error_details,
+                    retriable=False
+                ) from e
+                
+            except AgentsException as e:
+                # Generic SDK exception
+                error_details = {
+                    "type": "AgentsException", 
+                    "message": str(e),
+                    "retry": retry + 1,
+                    "max_retries": self.max_retries
+                }
+                
+                print(f"Generic Agents SDK error: {str(e)}")
+                if retry >= self.max_retries - 1:
+                    raise AgentError(
+                        f"Agents SDK error: {str(e)}",
+                        error_details,
+                        retriable=(retry < self.max_retries - 1)
+                    ) from e
+                
+                await self._exponential_backoff(retry)
+            
             except OpenAIError as e:
                 last_exception = e
                 error_details = {
@@ -149,11 +309,16 @@ class AgentManager:
                 retriable = getattr(e, 'status_code', 0) >= 500 or "server_error" in str(e).lower()
                 
                 if not retriable or retry >= self.max_retries - 1:
+                    # For 500 server errors related to large outputs, suggest splitting the query
+                    if getattr(e, 'status_code', 0) == 500 and "server_error" in str(e).lower():
+                        error_details["suggestion"] = "The server error might be due to processing too much data. Try splitting your query into multiple smaller queries or reducing the complexity."
+                    
                     raise AgentError("OpenAI API error occurred", error_details, retriable=retriable) from e
                 
                 # Log retry attempt
                 print(f"Retrying after OpenAI API error (attempt {retry+1}/{self.max_retries}): {str(e)}")
                 await self._exponential_backoff(retry)
+                
             except Exception as e:
                 last_exception = e
                 error_details = {
@@ -180,7 +345,8 @@ class AgentManager:
     async def process_message(
         self, 
         message: str,
-        streaming: bool = True
+        streaming: bool = False,
+        context_update: Optional[Dict[str, Any]] = None
     ) -> Union[str, AsyncGenerator[str, None]]:
         """
         Process a user message and return response.
@@ -188,11 +354,16 @@ class AgentManager:
         Args:
             message: The user message to process
             streaming: Whether to return a streaming response
+            context_update: Optional dictionary to update the context
         
         Returns:
             Either a complete response string or an async generator for streaming
         """
         try:
+            # Update context if provided
+            if context_update:
+                self.context.update(context_update)
+                
             # Create agent first to initialize mcp_server with retries
             agent = await self._create_agent_with_retry()
             
@@ -234,7 +405,8 @@ class AgentManager:
     async def process_message_robust(
         self,
         message: str,
-        streaming: bool = True
+        streaming: bool = False,
+        context_update: Optional[Dict[str, Any]] = None
     ) -> Union[str, AsyncGenerator[str, None]]:
         """
         Process a message with top-level retries for extra robustness.
@@ -247,7 +419,7 @@ class AgentManager:
         url_patterns = [
             original_url,
             "https://sequencer-v2.heurist.xyz/tool6c4acdfe/sse",  # Generic endpoint
-            "https://sequencer-v2.heurist.xyz/tool2782c748/sse",      # Alternative endpoint
+            "https://sequencer-v2.heurist.xyz/tool2782c748/sse",  # Alternative endpoint
         ]
         
         last_exception = None
@@ -255,7 +427,7 @@ class AgentManager:
             try:
                 # Set the current URL to try
                 self.mcp_proxy_url = url
-                return await self.process_message(message, streaming)
+                return await self.process_message(message, streaming, context_update)
             except AgentError as e:
                 last_exception = e
                 # Only continue if we have more URLs to try
@@ -282,4 +454,62 @@ class AgentManager:
 
     def get_trace_url(self) -> str:
         """Get the URL for the current trace."""
-        return f"https://platform.openai.com/traces/trace?trace_id={self.trace_id}" 
+        return f"https://platform.openai.com/traces/trace?trace_id={self.trace_id}"
+    
+    def create_guardrail(self, guardrail_function: Callable) -> InputGuardrail:
+        """
+        Create an input guardrail from a function.
+        
+        Args:
+            guardrail_function: Function that implements the guardrail logic
+            
+        Returns:
+            An InputGuardrail instance
+        """
+        return InputGuardrail(guardrail_function=guardrail_function)
+        
+    def add_handoff(self, agent: OpenAIAgent) -> None:
+        """
+        Add a handoff agent to this agent's handoffs.
+        
+        Args:
+            agent: The agent to add as a handoff option
+        """
+        if agent not in self.handoffs:
+            self.handoffs.append(agent)
+    
+    def add_guardrail(self, guardrail: InputGuardrail) -> None:
+        """
+        Add an input guardrail to this agent.
+        
+        Args:
+            guardrail: The guardrail to add
+        """
+        if guardrail not in self.input_guardrails:
+            self.input_guardrails.append(guardrail)
+    
+    def enable_guardrails(self) -> None:
+        """Enable the guardrails functionality."""
+        self.enable_guardrails = True
+        print("Guardrails enabled.")
+        
+    def disable_guardrails(self) -> None:
+        """Disable the guardrails functionality without removing configured guardrails."""
+        self.enable_guardrails = False
+        print("Guardrails disabled. They will not be applied during processing.")
+            
+    def clear_cache(self) -> None:
+        """
+        Clear the MCP server cache.
+        This is useful when you want to force fresh data retrieval.
+        """
+        if hasattr(self, 'mcp_server') and self.enable_mcp_cache:
+            if hasattr(self.mcp_server, 'invalidate_tools_cache'):
+                # Use the correct method as per documentation
+                self.mcp_server.invalidate_tools_cache()
+                print("MCP server tools cache invalidated.")
+            else:
+                # Fallback for older versions or if the method isn't available
+                print("Cache invalidation not directly supported. Recreating MCP server...")
+                self.mcp_server = None
+                print("MCP server reset. Cache will be rebuilt on next request.") 

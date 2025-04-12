@@ -32,7 +32,7 @@ class Settings:
         # Agent settings
         self.default_model = os.getenv("OPENAI_DEFAULT_MODEL", "gpt-4o")
         self.temperature = float(os.getenv("OPENAI_TEMPERATURE", "0.1"))
-        self.max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "100000"))
+        self.max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "500000"))
         
         # MCP Proxy settings
         self.mcp_proxy_command = os.getenv("MCP_PROXY_COMMAND", "/Users/frankhe/.local/bin/mcp-proxy")

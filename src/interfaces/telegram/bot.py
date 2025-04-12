@@ -44,13 +44,51 @@ class TelegramBotHandler:
             telebot.types.BotCommand("help", "Show help message"),
             telebot.types.BotCommand("model", "Show current AI model settings"),
             telebot.types.BotCommand("stats", "Show your usage statistics"),
-            telebot.types.BotCommand("ask", "Ask me a question")
+            telebot.types.BotCommand("ask", "Ask me a question"),
+            telebot.types.BotCommand("listen", "Start listening to all messages in the chat")
         ]
         self.bot.set_my_commands(commands)
     
     def is_authorized_chat(self, message):
         """Check if the message is from the authorized chat"""
         return message.chat.id == self.chat_id
+    
+    def extract_entities(self, message):
+        """Extract entities (like hyperlinks) from a message and format them for better processing"""
+        if not hasattr(message, 'entities') or not message.entities:
+            return message.text
+            
+        text = message.text
+        formatted_text = ""
+        last_position = 0
+        
+        # Sort entities by position to process them in order
+        sorted_entities = sorted(message.entities, key=lambda e: e.offset)
+        
+        for entity in sorted_entities:
+            # Add text before current entity
+            formatted_text += text[last_position:entity.offset]
+            
+            # Extract the entity text
+            entity_text = text[entity.offset:entity.offset + entity.length]
+            
+            # Handle different entity types
+            if entity.type == 'url':
+                formatted_text += f"[{entity_text}]({entity_text})"
+            elif entity.type == 'text_link':
+                formatted_text += f"[{entity_text}]({entity.url})"
+            elif entity.type in ['bold', 'italic', 'code', 'pre']:
+                formatted_text += entity_text  # Keep as is for now
+            else:
+                formatted_text += entity_text
+                
+            # Update last position
+            last_position = entity.offset + entity.length
+            
+        # Add remaining text
+        formatted_text += text[last_position:]
+        
+        return formatted_text
     
     def register_handlers(self):
         """Register message handlers"""
@@ -66,7 +104,8 @@ class TelegramBotHandler:
                 self.active_users[user_id] = {
                     "name": message.from_user.first_name,
                     "username": message.from_user.username,
-                    "history": []
+                    "history": [],
+                    "listening_mode": False
                 }
             
             self.bot.reply_to(
@@ -88,7 +127,8 @@ class TelegramBotHandler:
                 "/help - Show this help message\n"
                 "/model - Show the current AI model\n"
                 "/stats - Show your usage statistics\n"
-                "/ask - Ask me a question (e.g., /ask What's the weather like?)"
+                "/ask - Ask me a question (e.g., /ask What's the weather like?)\n"
+                "/listen - Start listening to all messages in the chat"
             )
         
         @self.bot.message_handler(commands=['model'])
@@ -136,7 +176,8 @@ class TelegramBotHandler:
                 self.active_users[user_id] = {
                     "name": message.from_user.first_name,
                     "username": message.from_user.username,
-                    "history": []
+                    "history": [],
+                    "listening_mode": False
                 }
             
             # Extract the question from the message (remove /ask)
@@ -148,6 +189,30 @@ class TelegramBotHandler:
             
             # Process the question
             self.process_message(message, question)
+        
+        @self.bot.message_handler(commands=['listen'])
+        def listen_command(message):
+            if not self.is_authorized_chat(message):
+                return
+                
+            user_id = message.from_user.id
+            
+            # Initialize user session if not exists
+            if user_id not in self.active_users:
+                self.active_users[user_id] = {
+                    "name": message.from_user.first_name,
+                    "username": message.from_user.username,
+                    "history": [],
+                    "listening_mode": False
+                }
+            
+            # Toggle listening mode
+            self.active_users[user_id]["listening_mode"] = not self.active_users[user_id].get("listening_mode", False)
+            
+            if self.active_users[user_id]["listening_mode"]:
+                self.bot.reply_to(message, "I am now listening to all messages in this chat. I will respond to any message automatically.")
+            else:
+                self.bot.reply_to(message, "Listening mode disabled. I will only respond to direct commands now.")
         
         # Only respond to direct messages (not in groups) that aren't commands
         @self.bot.message_handler(func=lambda message: message.chat.type == 'private' and not message.text.startswith('/'))
@@ -162,10 +227,53 @@ class TelegramBotHandler:
                 self.active_users[user_id] = {
                     "name": message.from_user.first_name,
                     "username": message.from_user.username,
-                    "history": []
+                    "history": [],
+                    "listening_mode": False
                 }
             
             # Process the direct message
+            self.process_message(message, message.text)
+        
+        # Handle all messages in groups where bot is mentioned or in reply to bot's message
+        @self.bot.message_handler(func=lambda message: (
+            message.chat.type in ['group', 'supergroup'] and 
+            (message.reply_to_message and message.reply_to_message.from_user.id == self.bot.get_me().id or
+             self.bot.get_me().username and f"@{self.bot.get_me().username}" in message.text)
+        ))
+        def handle_group_mention(message):
+            if not self.is_authorized_chat(message):
+                return
+                
+            user_id = message.from_user.id
+            
+            # Initialize user session if not exists
+            if user_id not in self.active_users:
+                self.active_users[user_id] = {
+                    "name": message.from_user.first_name,
+                    "username": message.from_user.username,
+                    "history": [],
+                    "listening_mode": False
+                }
+                
+            # Extract text (remove bot mention if present)
+            text = message.text
+            if self.bot.get_me().username and f"@{self.bot.get_me().username}" in text:
+                text = text.replace(f"@{self.bot.get_me().username}", "").strip()
+                
+            # Process the message
+            self.process_message(message, text)
+            
+        # Handle all new messages when in listening mode
+        @self.bot.message_handler(func=lambda message: 
+            message.from_user.id in self.active_users and 
+            self.active_users[message.from_user.id].get("listening_mode", False) and
+            not message.text.startswith('/')
+        )
+        def handle_all_messages(message):
+            if not self.is_authorized_chat(message):
+                return
+                
+            # Process all messages when in listening mode
             self.process_message(message, message.text)
     
     def process_message(self, message, question_text):
@@ -174,6 +282,10 @@ class TelegramBotHandler:
         load_dotenv(override=True)
         
         user_id = message.from_user.id
+        
+        # Process entities if present in the original message
+        if hasattr(message, 'entities') and message.entities:
+            question_text = self.extract_entities(message)
         
         # Store the question in history
         self.active_users[user_id]["history"].append({"role": "user", "content": question_text})
