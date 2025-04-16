@@ -2,7 +2,6 @@
 
 import os
 import asyncio
-from dotenv import load_dotenv
 from src.core.agent import AgentManager
 from src.config.settings import Settings
 
@@ -43,10 +42,9 @@ class TerminalInterface:
         """Get a streaming response from the agent."""
         try:
             # Reload environment variables before each request
-            load_dotenv(override=True)
+            self.settings = Settings.reload()
             
-            # Reinitialize settings and agent manager with fresh env variables
-            self.settings = Settings()
+            # Reinitialize agent manager with fresh settings
             self.agent_config = self.settings.get_agent_config()
             self.agent_manager = AgentManager(**self.agent_config)
             
@@ -77,10 +75,9 @@ class TerminalInterface:
         """Get a non-streaming response from the agent."""
         try:
             # Reload environment variables before each request
-            load_dotenv(override=True)
+            self.settings = Settings.reload()
             
-            # Reinitialize settings and agent manager with fresh env variables
-            self.settings = Settings()
+            # Reinitialize agent manager with fresh settings
             self.agent_config = self.settings.get_agent_config()
             self.agent_manager = AgentManager(**self.agent_config)
             

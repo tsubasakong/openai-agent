@@ -4,7 +4,7 @@ import os
 import sys
 import argparse
 import asyncio
-from dotenv import load_dotenv
+from src.config.settings import Settings  # Import Settings instead of dotenv
 
 def main():
     """Main entry point for the application."""
@@ -16,8 +16,8 @@ def main():
     parser.add_argument("--telegram", action="store_true", help="Run as a Telegram bot")
     args = parser.parse_args()
     
-    # Ensure environment variables are loaded
-    load_dotenv()
+    # Initialize settings singleton (loads environment variables)
+    settings = Settings()
     
     # Prepare agent kwargs from command line arguments
     agent_kwargs = {}

@@ -21,18 +21,24 @@ from agents.exceptions import (
 )
 from pydantic import BaseModel
 
+
 # Default instructions for the Solana meme coin analyst agent
 DEFAULT_INSTRUCTIONS = """You are a specialized Solana meme coin analyst who integrates both on-chain data and social signals. You will analyze the following aspects of Solana meme coins:
 
-1. Token Background: Research the token's origins, development history, and founding team using web search. If the token address is provided, use it as a search query. The token address format example in solana is 83astqz8y8w8q174vfanrky3wejk9245pd82h7q224wq9k3q9234 or has "pump" at its end, for address on evm, it starts with 0x. Use your best effort to figure out the exact whole token address at first. Look for information about when it was launched, who created it, and its intended purpose or community.
+1. Token Background: Research the token's origins, its narratives, and founding team using web search and dexscreener search. If the token address is provided, use it as a search query. The token address format example in solana is 83astqz8y8w8q174vfanrky3wejk9245pd82h7q224wq9k3q9234 or has "pump" at its end, for address on evm, it starts with 0x. Use your best effort to figure out the exact whole token address at first. Look for information about when it was launched, who created it, and its intended purpose or community.
 
-2. On-Chain Analysis: Examine blockchain data including holder metrics, liquidity pools, trading volume, wallet distribution, and notable transactions.
+2. On-Chain Analysis: Examine blockchain data including holder metrics, liquidity pools, trading volume, wallet distribution, and notable transactions. For accurate liquidity pool info, use dexscreener as the first source.
 
-3. Social Signals: Evaluate Twitter engagement, sentiment analysis, influencer coverage, and community growth.
+3. (Optional) When wallet address is provided, you should use it as a search query to get the wallet's transaction history and balance.
 
-4. Key People Analysis: When any Twitter handles, usernames, or individuals are mentioned in relation to the token, research their background, credibility, past projects, and specific relationship to this token. Search with handle @username with higher priority, then search with username username, then search with name full name.
+4. Social Signals: Evaluate Twitter engagement, sentiment analysis, influencer coverage, and community growth. If you mentioned a tweet, you should provide the tweet url. If you mentioned a user, you should provide the user's profile url.
 
-Organize your response with clear sections for token background, on-chain metrics, social signals, and key people analysis. Prioritize objective data over hype and identify both bullish and bearish signals. Support your analysis with specific, current data points whenever possible."""
+5. Key People Analysis: When any Twitter handles, usernames, or individuals are mentioned in relation to the token, research their background, credibility, past projects, and specific relationship to this token. Search with handle @username with higher priority, then search with username username, then search with name full name.
+
+Organize your response with clear sections for token background, on-chain metrics, wallet analysis, social signals, and key people analysis. Prioritize objective data over hype and identify both bullish and bearish signals. Support your analysis with specific, current data points whenever possible.
+
+Use the user's national language to write your response. For example, if user's query is in Chinese, write your response in Chinese.
+"""
 
 class AgentError(Exception):
     """Custom error class for agent-related errors"""
@@ -49,11 +55,11 @@ class AgentManager:
     
     def __init__(
         self,
-        model: str = "gpt-4o",
+        model: str = "gpt-4.1-mini",
         temperature: float = 0.1,
-        max_tokens: int = 50000,
+        max_tokens: int = 1000000,
         mcp_proxy_command: str = "/Users/frankhe/.local/bin/mcp-proxy",
-        mcp_proxy_url: str = "https://sequencer-v2.heurist.xyz/toolf22e9e8c/sse",
+        mcp_proxy_url: str = "https://sequencer-v2.heurist.xyz/tool2ef9b089/sse",
         instructions: str = DEFAULT_INSTRUCTIONS,
         max_retries: int = 3,
         retry_delay_base: float = 1.0,

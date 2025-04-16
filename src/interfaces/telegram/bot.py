@@ -278,8 +278,8 @@ class TelegramBotHandler:
     
     def process_message(self, message, question_text):
         """Process user messages through the agent manager"""
-        # Reload environment variables before each request
-        load_dotenv(override=True)
+        # Reload environment variables before each request using Settings singleton
+        self.settings = Settings.reload()
         
         user_id = message.from_user.id
         
@@ -290,8 +290,7 @@ class TelegramBotHandler:
         # Store the question in history
         self.active_users[user_id]["history"].append({"role": "user", "content": question_text})
         
-        # Reinitialize settings and agent manager with fresh env variables
-        self.settings = Settings()
+        # Reinitialize agent manager with fresh settings
         self.agent_config = self.settings.get_agent_config()
         self.agent_manager = AgentManager(**self.agent_config)
         
