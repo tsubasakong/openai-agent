@@ -63,12 +63,12 @@ To use the Telegram interface, you need to:
 
 1. Create a Telegram bot using [@BotFather](https://t.me/BotFather) and get your token
 2. Add the token to your `.env` file as `TELEGRAM_BOT_TOKEN`
-3. Optionally, add a comma-separated list of allowed user IDs as `TELEGRAM_ALLOWED_USERS`
+3. Optionally, add a comma-separated list of allowed chat IDs as `TELEGRAM_CHAT_ID`
 
 Then run:
 
 ```
-python src/main.py --telegram
+python main.py --telegram
 ```
 
 The bot will start and you can interact with it on Telegram.
@@ -158,22 +158,19 @@ python telebot_version.py
 ### Bot Commands
 
 The bot supports the following commands:
-- `/start` - Start the bot
+- `/start` - Initialize the bot and get welcome message
 - `/help` - Show available commands
 - `/model` - Show current model settings
 - `/stats` - Show conversation statistics
 - `/ask [question]` - Ask a question to the AI assistant
 
-In private chats, the bot responds to all messages. In group chats, it only responds to messages that start with `/ask`.
-
-For more detailed instructions, see [TELEGRAM_BOT_GUIDE.md](TELEGRAM_BOT_GUIDE.md).
+The bot only responds to explicit commands. The primary way to interact with the bot is using the `/ask` command, such as `/ask What's the weather like today?`.
 
 ## Features
 
-- Chat with OpenAI assistants via Telegram
-- Supports both text and file sharing
-- Command support (/start, /help, /model, /stats)
-- User authentication
+- Chat with OpenAI assistants via Telegram using commands
+- Command-driven interface for precise control
+- User authentication based on authorized chat IDs
 
 ## CLI Mode
 

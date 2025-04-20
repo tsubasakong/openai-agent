@@ -47,10 +47,7 @@ class TelegramBotHandler:
             telebot.types.BotCommand("help", "Show help message"),
             telebot.types.BotCommand("model", "Show current AI model settings"),
             telebot.types.BotCommand("stats", "Show your usage statistics"),
-            telebot.types.BotCommand("ask", "Ask me a question"),
-            telebot.types.BotCommand("listen", "Start listening to all messages in the chat"),
-            telebot.types.BotCommand("status", "Check listening mode status"),
-            telebot.types.BotCommand("debug", "Debug the bot configuration")
+            telebot.types.BotCommand("ask", "Ask me a question")
         ]
         self.bot.set_my_commands(commands)
     
@@ -137,10 +134,7 @@ class TelegramBotHandler:
         command = command[1:] if command.startswith('/') else command
         
         # Handle each command
-        if command == 'debug':
-            self.handle_debug_command(message)
-            return True
-        elif command == 'start':
+        if command == 'start':
             self.handle_start_command(message)
             return True
         elif command == 'help':
@@ -152,39 +146,11 @@ class TelegramBotHandler:
         elif command == 'stats':
             self.handle_stats_command(message)
             return True
-        elif command == 'listen':
-            self.handle_listen_command(message)
-            return True
-        elif command == 'status':
-            self.handle_status_command(message)
-            return True
         elif command == 'ask':
             self.handle_ask_command(message)
             return True
             
         return False  # Command not recognized
-        
-    def handle_debug_command(self, message):
-        """Handle the /debug command"""
-        if not self.is_authorized_chat(message):
-            logger.warning(f"Unauthorized chat {message.chat.id} tried to use /debug command")
-            return
-        
-        # Refresh settings to ensure we have the latest
-        self.settings = Settings.reload()
-        self.chat_id = self.settings.telegram_chat_id
-        
-        debug_info = [
-            f"Bot username: @{self.bot.get_me().username}",
-            f"Current chat ID: {message.chat.id}",
-            f"Chat type: {message.chat.type}",
-            f"Authorized chat IDs: {self.chat_id}",
-            f"Is authorized: {int(message.chat.id) in self.chat_id}",
-            f"Active users: {len(self.active_users)}",
-            f"OpenAI model: {self.agent_config['model']}"
-        ]
-        
-        self.bot.reply_to(message, "\n".join(debug_info))
         
     def handle_start_command(self, message):
         """Handle the /start command"""
@@ -200,8 +166,7 @@ class TelegramBotHandler:
             self.active_users[user_id] = {
                 "name": message.from_user.first_name,
                 "username": message.from_user.username,
-                "history": [],
-                "listening_chats": set()  # Track chats where listening is enabled for this user
+                "history": []
             }
         
         self.bot.reply_to(
@@ -224,10 +189,7 @@ class TelegramBotHandler:
             "/help - Show this help message\n"
             "/model - Show the current AI model\n"
             "/stats - Show your usage statistics\n"
-            "/ask - Ask me a question (e.g., /ask What's the weather like?)\n"
-            "/listen - Toggle listening to all messages in this chat\n"
-            "/status - Check listening mode status\n"
-            "/debug - Show debug information"
+            "/ask - Ask me a question (e.g., /ask What's the weather like?)"
         )
         
     def handle_model_command(self, message):
@@ -265,45 +227,6 @@ class TelegramBotHandler:
                 "No statistics available. Start a conversation first with /ask."
             )
             
-    def handle_listen_command(self, message):
-        """Handle the /listen command"""
-        logger.info(f"Processing /listen command in chat {message.chat.id} ({message.chat.type})")
-        if not self.is_authorized_chat(message):
-            logger.warning(f"Unauthorized chat {message.chat.id} tried to use /listen command")
-            return
-            
-        user_id = message.from_user.id
-        chat_id = message.chat.id
-        
-        # Initialize user session if not exists
-        if user_id not in self.active_users:
-            self.active_users[user_id] = {
-                "name": message.from_user.first_name,
-                "username": message.from_user.username,
-                "history": [],
-                "listening_chats": set()
-            }
-        
-        # Make sure listening_chats exists
-        if "listening_chats" not in self.active_users[user_id]:
-            self.active_users[user_id]["listening_chats"] = set()
-            
-        # Toggle listening mode for this specific chat
-        if chat_id in self.active_users[user_id]["listening_chats"]:
-            self.active_users[user_id]["listening_chats"].remove(chat_id)
-            listening_mode = False
-        else:
-            self.active_users[user_id]["listening_chats"].add(chat_id)
-            listening_mode = True
-            
-        logger.info(f"User {user_id} listening mode for chat {chat_id}: {listening_mode}")
-        logger.info(f"User's active listening chats: {self.active_users[user_id]['listening_chats']}")
-        
-        if listening_mode:
-            self.bot.reply_to(message, "I am now listening to all messages in this chat. I will respond to any message automatically.")
-        else:
-            self.bot.reply_to(message, "Listening mode disabled. I will only respond to direct commands now.")
-            
     def handle_ask_command(self, message):
         """Handle the /ask command"""
         if not self.is_authorized_chat(message):
@@ -317,8 +240,7 @@ class TelegramBotHandler:
             self.active_users[user_id] = {
                 "name": message.from_user.first_name,
                 "username": message.from_user.username,
-                "history": [],
-                "listening_chats": set()
+                "history": []
             }
         
         # Extract the question from the message (remove /ask)
@@ -330,37 +252,6 @@ class TelegramBotHandler:
         
         # Process the question
         self.process_message(message, question)
-    
-    def handle_status_command(self, message):
-        """Handle the /status command"""
-        if not self.is_authorized_chat(message):
-            return
-            
-        user_id = message.from_user.id
-        chat_id = message.chat.id
-        
-        if (user_id in self.active_users and 
-            "listening_chats" in self.active_users[user_id]):
-            is_listening = chat_id in self.active_users[user_id]["listening_chats"]
-            status_msg = f"Listening mode is {'ON' if is_listening else 'OFF'} for this chat.\n\n"
-            
-            if is_listening:
-                status_msg += "I will automatically respond to all messages in this chat."
-            else:
-                status_msg += "I will only respond to commands or when mentioned."
-                
-            # Show global listening status
-            all_listening_chats = []
-            for user, data in self.active_users.items():
-                if "listening_chats" in data and data["listening_chats"]:
-                    all_listening_chats.extend(data["listening_chats"])
-                    
-            if all_listening_chats:
-                status_msg += f"\n\nListening is active in {len(set(all_listening_chats))} chat(s) total."
-        else:
-            status_msg = "Listening mode is not configured. Use /listen to enable it."
-            
-        self.bot.reply_to(message, status_msg)
     
     def register_handlers(self):
         """Register message handlers"""
@@ -374,18 +265,6 @@ class TelegramBotHandler:
                 if message.text and message.text.startswith('/'):
                     if self.handle_command(message, message.text):
                         return
-                        
-                # For non-commands, check if listening mode is enabled for this chat
-                user_id = message.from_user.id
-                chat_id = message.chat.id
-                
-                if (self.is_authorized_chat(message) and
-                    user_id in self.active_users and
-                    "listening_chats" in self.active_users[user_id] and
-                    chat_id in self.active_users[user_id]["listening_chats"]):
-                    logger.info(f"Processing message in listening mode from {user_id} in chat {chat_id}: '{message.text}'")
-                    self.process_message(message, message.text)
-                    return
                     
             except Exception as e:
                 logger.error(f"Error in debug_handler: {str(e)}", exc_info=True)
@@ -408,8 +287,7 @@ class TelegramBotHandler:
                 self.active_users[user_id] = {
                     "name": message.from_user.first_name,
                     "username": message.from_user.username,
-                    "history": [],
-                    "listening_chats": set()  # Track chats where listening is enabled for this user
+                    "history": []
                 }
             
             self.bot.reply_to(
@@ -418,28 +296,6 @@ class TelegramBotHandler:
                 f"Use /ask followed by your question to interact with me.\n"
                 f"Type /help to see all available commands."
             )
-        
-        @self.bot.message_handler(commands=['debug'])
-        def debug_command(message):
-            if not self.is_authorized_chat(message):
-                logger.warning(f"Unauthorized chat {message.chat.id} tried to use /debug command")
-                return
-            
-            # Refresh settings to ensure we have the latest
-            self.settings = Settings.reload()
-            self.chat_id = self.settings.telegram_chat_id
-            
-            debug_info = [
-                f"Bot username: @{self.bot.get_me().username}",
-                f"Current chat ID: {message.chat.id}",
-                f"Chat type: {message.chat.type}",
-                f"Authorized chat IDs: {self.chat_id}",
-                f"Is authorized: {int(message.chat.id) in self.chat_id}",
-                f"Active users: {len(self.active_users)}",
-                f"OpenAI model: {self.agent_config['model']}"
-            ]
-            
-            self.bot.reply_to(message, "\n".join(debug_info))
         
         @self.bot.message_handler(commands=['help'])
         def help_command(message):
@@ -454,10 +310,7 @@ class TelegramBotHandler:
                 "/help - Show this help message\n"
                 "/model - Show the current AI model\n"
                 "/stats - Show your usage statistics\n"
-                "/ask - Ask me a question (e.g., /ask What's the weather like?)\n"
-                "/listen - Toggle listening to all messages in this chat\n"
-                "/status - Check listening mode status\n"
-                "/debug - Show debug information"
+                "/ask - Ask me a question (e.g., /ask What's the weather like?)"
             )
         
         @self.bot.message_handler(commands=['model'])
@@ -508,8 +361,7 @@ class TelegramBotHandler:
                 self.active_users[user_id] = {
                     "name": message.from_user.first_name,
                     "username": message.from_user.username,
-                    "history": [],
-                    "listening_chats": set()
+                    "history": []
                 }
             
             # Extract the question from the message (remove /ask)
@@ -521,97 +373,6 @@ class TelegramBotHandler:
             
             # Process the question
             self.process_message(message, question)
-        
-        @self.bot.message_handler(commands=['listen'])
-        def listen_command(message):
-            logger.info(f"Received /listen command in chat {message.chat.id} ({message.chat.type})")
-            if not self.is_authorized_chat(message):
-                logger.warning(f"Unauthorized chat {message.chat.id} tried to use /listen command")
-                return
-                
-            user_id = message.from_user.id
-            chat_id = message.chat.id
-            
-            # Initialize user session if not exists
-            if user_id not in self.active_users:
-                self.active_users[user_id] = {
-                    "name": message.from_user.first_name,
-                    "username": message.from_user.username,
-                    "history": [],
-                    "listening_chats": set()
-                }
-            
-            # Make sure listening_chats exists
-            if "listening_chats" not in self.active_users[user_id]:
-                self.active_users[user_id]["listening_chats"] = set()
-                
-            # Toggle listening mode for this specific chat
-            if chat_id in self.active_users[user_id]["listening_chats"]:
-                self.active_users[user_id]["listening_chats"].remove(chat_id)
-                listening_mode = False
-            else:
-                self.active_users[user_id]["listening_chats"].add(chat_id)
-                listening_mode = True
-            
-            if listening_mode:
-                self.bot.reply_to(message, "I am now listening to all messages in this chat. I will respond to any message automatically.")
-            else:
-                self.bot.reply_to(message, "Listening mode disabled. I will only respond to direct commands now.")
-        
-        # Only respond to direct messages (not in groups) that aren't commands
-        @self.bot.message_handler(func=lambda message: message.chat.type == 'private' and not message.text.startswith('/'))
-        def handle_direct_message(message):
-            if not self.is_authorized_chat(message):
-                logger.warning(f"Unauthorized chat {message.chat.id} attempted direct message")
-                return
-                
-            logger.info(f"Processing direct message from {message.from_user.id} in private chat: '{message.text}'")
-            user_id = message.from_user.id
-            
-            # Initialize user session if not exists
-            if user_id not in self.active_users:
-                self.active_users[user_id] = {
-                    "name": message.from_user.first_name,
-                    "username": message.from_user.username,
-                    "history": [],
-                    "listening_chats": set()
-                }
-            
-            # Process the direct message
-            self.process_message(message, message.text)
-        
-        # Handle all messages in groups where bot is mentioned or in reply to bot's message
-        @self.bot.message_handler(func=lambda message: (
-            message.chat.type in ['group', 'supergroup'] and 
-            (message.reply_to_message and message.reply_to_message.from_user.id == self.bot.get_me().id or
-             self.bot.get_me().username and f"@{self.bot.get_me().username}" in message.text)
-        ))
-        def handle_group_mention(message):
-            if not self.is_authorized_chat(message):
-                logger.warning(f"Unauthorized chat {message.chat.id} attempted group mention")
-                return
-                
-            logger.info(f"Processing group mention from {message.from_user.id} in chat {message.chat.id}: '{message.text}'")
-            user_id = message.from_user.id
-            
-            # Initialize user session if not exists
-            if user_id not in self.active_users:
-                self.active_users[user_id] = {
-                    "name": message.from_user.first_name,
-                    "username": message.from_user.username,
-                    "history": [],
-                    "listening_chats": set()
-                }
-                
-            # Extract text (remove bot mention if present)
-            text = message.text
-            if self.bot.get_me().username and f"@{self.bot.get_me().username}" in text:
-                text = text.replace(f"@{self.bot.get_me().username}", "").strip()
-                
-            # Process the message
-            self.process_message(message, text)
-            
-        # The debug_handler now handles messages in listening mode
     
     def process_message(self, message, question_text):
         """Process user messages through the agent manager"""
