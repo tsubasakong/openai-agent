@@ -59,7 +59,7 @@ class AgentManager:
         temperature: float = 0.1,
         max_tokens: int = 1000000,
         mcp_proxy_command: str = "/Users/frankhe/.local/bin/mcp-proxy",
-        mcp_proxy_url: str = "https://sequencer-v2.heurist.xyz/tool2ef9b089/sse",
+        mcp_proxy_url: str = "https://sequencer-v2.heurist.xyz/toolc1530ff5/sse",
         instructions: str = DEFAULT_INSTRUCTIONS,
         max_retries: int = 3,
         retry_delay_base: float = 1.0,

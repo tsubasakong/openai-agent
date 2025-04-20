@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 from typing import Dict, Any, Optional
+import logging
 
 
 class Settings:
@@ -43,12 +44,17 @@ class Settings:
         if self._initialized and not force_reload:
             return
             
+        logger = logging.getLogger(__name__)
+        logger.info(f"Initializing Settings (force_reload={force_reload})")
+            
         # Find the .env file if not specified
         if env_file is None:
             env_path = Path(__file__).resolve().parent.parent.parent / '.env'
-            load_dotenv(env_path, override=force_reload)
+            logger.info(f"Loading environment from {env_path}")
+            load_dotenv(env_path, override=True)  # Always override to ensure latest values
         else:
-            load_dotenv(env_file, override=force_reload)
+            logger.info(f"Loading environment from {env_file}")
+            load_dotenv(env_file, override=True)  # Always override to ensure latest values
             
         # Verify API key is set
         if not os.getenv("OPENAI_API_KEY"):
@@ -65,7 +71,11 @@ class Settings:
         
         # Telegram Bot settings
         self.telegram_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
-        self.telegram_chat_id = self._parse_chat_id()
+        
+        # Parse chat IDs directly from os.environ to avoid any caching issues
+        chat_id_str = os.environ.get("TELEGRAM_CHAT_ID", "")
+        logger.info(f"Raw TELEGRAM_CHAT_ID from os.environ: '{chat_id_str}'")
+        self.telegram_chat_id = self._parse_chat_id(chat_id_str)
         
         # Mark as initialized
         self._initialized = True
@@ -75,15 +85,42 @@ class Settings:
         """Force reload all environment variables."""
         return cls(force_reload=True)
     
-    def _parse_chat_id(self) -> Optional[int]:
-        """Parse the Telegram chat ID from environment variables."""
-        chat_id = os.getenv("TELEGRAM_CHAT_ID")
-        if not chat_id:
+    def _parse_chat_id(self, chat_id_str: str) -> Optional[list]:
+        """Parse the Telegram chat ID from a string.
+        
+        Args:
+            chat_id_str: String containing comma-separated chat IDs
+            
+        Returns:
+            A list of authorized chat IDs, or None if not configured
+        """
+        logger = logging.getLogger(__name__)
+        
+        logger.info(f"Parsing chat IDs from: '{chat_id_str}'")
+        
+        if not chat_id_str:
+            logger.warning("No chat IDs provided")
             return None
+        
         try:
-            return int(chat_id)
-        except ValueError:
-            raise ValueError("TELEGRAM_CHAT_ID must be a valid integer")
+            # Split by comma and convert each to integer
+            chat_ids = []
+            for id_str in chat_id_str.split(','):
+                id_str = id_str.strip()
+                chat_id = int(id_str)
+                logger.info(f"Parsed chat ID: {chat_id} (type: {type(chat_id)})")
+                chat_ids.append(chat_id)
+                
+            if not chat_ids:
+                logger.warning("No valid chat IDs found after parsing")
+                return None
+                
+            logger.info(f"Final parsed chat IDs: {chat_ids}")
+            return chat_ids
+        except ValueError as e:
+            error_msg = f"TELEGRAM_CHAT_ID must contain valid integers separated by commas: {e}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
     
     def get_agent_config(self) -> Dict[str, Any]:
         """Get the agent configuration settings."""
